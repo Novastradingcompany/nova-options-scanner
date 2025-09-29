@@ -16,7 +16,7 @@ load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # ----------------------------
-# Utils
+# Utility Functions
 # ----------------------------
 def bs_delta(S, K, T, r, sigma, option_type="put"):
     if T <= 0 or sigma <= 0:
@@ -34,30 +34,24 @@ def bs_delta(S, K, T, r, sigma, option_type="put"):
 def scan_verticals(options_df, spot_price, expiry, dte, T, max_width, max_loss, min_pop, raw_mode, side, contracts=1):
     results = []
     rejects = []
-
     for i in range(len(options_df) - 1):
         short = options_df.iloc[i]
         long = options_df.iloc[i + 1]
-
         width = abs(long["strike"] - short["strike"])
         short_mid = (short["bid"] + short["ask"]) / 2
         long_mid = (long["bid"] + long["ask"]) / 2
         credit = short_mid - long_mid
-
         credit_total = credit * 100 * contracts
         max_loss_calc = width * 100 * contracts - credit_total
-
         sigma = short["impliedVolatility"]
         delta = bs_delta(S=spot_price, K=short["strike"], T=T, r=0.05, sigma=sigma, option_type=side)
         pop = round((1 - abs(delta)) * 100, 2) if delta else None
-
         if side == "put":
             breakeven_val = short["strike"] - (credit_total / (100 * contracts))
             distance_pct = (spot_price - breakeven_val) / spot_price * 100
         else:
             breakeven_val = short["strike"] + (credit_total / (100 * contracts))
             distance_pct = (breakeven_val - spot_price) / spot_price * 100
-
         row = {
             "Strategy": "Bull Put" if side == "put" else "Bear Call",
             "Expiry": expiry,
@@ -72,7 +66,6 @@ def scan_verticals(options_df, spot_price, expiry, dte, T, max_width, max_loss, 
             "Delta": delta,
             "Contracts": contracts
         }
-
         if raw_mode:
             results.append(row)
         else:
@@ -82,16 +75,13 @@ def scan_verticals(options_df, spot_price, expiry, dte, T, max_width, max_loss, 
             if delta is None: continue
             if pop < min_pop: continue
             results.append(row)
-
     return pd.DataFrame(results), rejects
 
 def scan_condors(opt_chain, spot_price, expiry, dte, T, max_width, max_loss, min_pop, raw_mode, contracts=1):
     puts_df = opt_chain.puts
     calls_df = opt_chain.calls
-
     put_spreads, _ = scan_verticals(puts_df, spot_price, expiry, dte, T, max_width, max_loss, min_pop, True, "put", contracts)
     call_spreads, _ = scan_verticals(calls_df, spot_price, expiry, dte, T, max_width, max_loss, min_pop, True, "call", contracts)
-
     condors = []
     for _, put in pd.DataFrame(put_spreads).iterrows():
         put_strike = float(put["Trade"].split()[1][:-1])
@@ -100,18 +90,14 @@ def scan_condors(opt_chain, spot_price, expiry, dte, T, max_width, max_loss, min
             call_strike = float(call["Trade"].split()[1][:-1])
             if call_strike <= spot_price: continue
             if abs(put["Width ($)"] - call["Width ($)"]) > 0.01: continue
-
             total_credit = put["Credit ($)"] + call["Credit ($)"]
             total_width = put["Width ($)"]
             max_loss_calc = total_width * 100 * contracts - total_credit
-
             pop_put = put["POP %"] / 100 if put["POP %"] else 0
             pop_call = call["POP %"] / 100 if call["POP %"] else 0
             combined_pop = round(pop_put * pop_call * 100, 2)
-
             lower_breakeven_val = put_strike - (total_credit / (100 * contracts))
             upper_breakeven_val = call_strike + (total_credit / (100 * contracts))
-
             condor = {
                 "Strategy": "Iron Condor",
                 "Expiry": expiry,
@@ -126,7 +112,6 @@ def scan_condors(opt_chain, spot_price, expiry, dte, T, max_width, max_loss, min
                 "Contracts": contracts,
                 "Spot": spot_price
             }
-
             if raw_mode:
                 condors.append(condor)
             else:
@@ -134,7 +119,6 @@ def scan_condors(opt_chain, spot_price, expiry, dte, T, max_width, max_loss, min
                 if total_credit <= 0: continue
                 if combined_pop < min_pop: continue
                 condors.append(condor)
-
     return pd.DataFrame(condors)
 
 def style_table(df, min_pop):
@@ -175,24 +159,23 @@ def style_table(df, min_pop):
     )
 
 # ----------------------------
-# Session state
+# Session State
 # ----------------------------
 if "nova_chat" not in st.session_state:
-    st.session_state.nova_chat = []  # [{"role":"user"/"assistant","content":str}]
+    st.session_state.nova_chat = []
 if "last_trades_df" not in st.session_state:
-    st.session_state.last_trades_df = None  # pandas DataFrame
+    st.session_state.last_trades_df = None
 if "last_trades_records" not in st.session_state:
-    st.session_state.last_trades_records = None  # list of dicts for OpenAI
+    st.session_state.last_trades_records = None
 if "last_meta" not in st.session_state:
-    st.session_state.last_meta = None  # {"ticker","expiry","dte","min_pop","spot","strategy"}
+    st.session_state.last_meta = None
 
 # ----------------------------
-# Scanner UI (unchanged controls)
+# Scanner UI
 # ----------------------------
 st.title("📊 Nova Options Scanner")
 
 ticker_input = st.text_input("Enter Ticker Symbol", "NVDA").upper()
-
 exp_dates, spot_price = [], None
 if ticker_input:
     try:
@@ -203,10 +186,8 @@ if ticker_input:
     except Exception:
         exp_dates, spot_price = [], None
 
-if exp_dates:
-    expiry_selected = st.selectbox("Select Expiration Date", exp_dates)
-else:
-    expiry_selected = None
+expiry_selected = st.selectbox("Select Expiration Date", exp_dates) if exp_dates else None
+if not exp_dates:
     st.warning("⚠️ Could not fetch expiration dates for this ticker.")
 
 max_width = st.slider("Max Spread Width ($)", 0.5, 5.0, 2.5, 0.5)
@@ -239,111 +220,103 @@ if st.button("Scan") and expiry_selected:
                                   max_width, max_loss, min_pop, raw_mode, contracts)
             rejects = []
 
-        if trades is not None and not trades.empty:
-            # Persist results for future reruns (so Send button won’t “clear” the table)
-            st.session_state.last_trades_df = trades.copy()
-            st.session_state.last_trades_records = trades.to_dict(orient="records")
-            st.session_state.last_meta = {
-                "ticker": ticker_input,
-                "expiry": expiry_selected,
-                "dte": int(dte),
-                "min_pop": int(min_pop),
-                "spot": float(spot_price) if spot_price is not None else None,
-                "strategy": spread_type,
-                "contracts": int(contracts)
-            }
-            just_scanned = True
-        else:
-            st.warning("⚠️ No trades passed filters.")
-            if rejects:
-                st.write(pd.DataFrame(rejects[:10], columns=["Reason", "Strike", "Value"]))
+    if trades is not None and not trades.empty:
+     trades["Symbol"] = ticker_input  # ✅ add ticker to each trade row
+     st.session_state.last_trades_df = trades.copy()
+     st.session_state.last_trades_records = trades.to_dict(orient="records")
+     st.session_state.last_meta = {
+        "ticker": ticker_input,
+        "expiry": expiry_selected,
+        "dte": int(dte),
+        "min_pop": int(min_pop),
+        "spot": float(spot_price) if spot_price is not None else None,
+        "strategy": spread_type,
+        "contracts": int(contracts)
+    }
+    just_scanned = True
+else:
+    st.warning("⚠️ No trades passed filters.")
 
 # ----------------------------
-# Results display (persists across reruns)
+# Display Results & Auto-Summary
 # ----------------------------
 def render_results(trades_df, min_pop_val):
-    # Column ordering logic preserved
-    column_order = ["Strategy","Expiry","DTE","Trade","Width ($)","Credit ($)","Max Loss ($)","POP %","Breakeven","Distance %","Delta","Contracts"]
+    cols = ["Strategy","Expiry","DTE","Trade","Width ($)","Credit ($)","Max Loss ($)","POP %","Breakeven","Distance %","Delta","Contracts"]
     if "Spot" in trades_df.columns:
-        column_order.append("Spot")
-    trades_show = trades_df[column_order]
-    st.success(f"✅ Found {len(trades_show)} {st.session_state.last_meta['strategy']} candidates")
-    # Keep original styling approach
-    st.dataframe(style_table(trades_show, min_pop_val), width="stretch")
+        cols.append("Spot")
+    st.success(f"✅ Found {len(trades_df)} {st.session_state.last_meta['strategy']} candidates")
+    st.dataframe(style_table(trades_df[cols], min_pop_val), width="stretch")
 
 def build_summary_prompt():
     meta = st.session_state.last_meta
     recs = st.session_state.last_trades_records
     if not meta or not recs:
-        return "You are Nova. No scan results available. Ask the user to run a scan."
+        return "You are Nova. No scan results available."
 
-    # Keep content tight—Nova must give a decisive call using our rules
-    header = f"""
-You are Nova, Denny’s senior trading partner. Apply Rebuild Phase rules strictly:
-- POP ≥ 80%
-- Max Loss ≤ 300
-- Prefer narrow widths ($1–$1.50) and closest expiry with safe distance
-- Risk cap per trade: $200–$300 (prefer ≤ $200)
-Meta: Ticker={meta['ticker']}, Expiry={meta['expiry']} ({meta['dte']} DTE), Spot={meta['spot']}, Strategy={meta['strategy']}, Min POP slider={meta['min_pop']}%, Contracts={meta['contracts']}
-Return a single decisive recommendation with:
-- Exact trade (short/long strikes), credit, POP, max loss, breakeven(s), distance
-- Why this is the safest fit for the rules
-- Clear entry/exit plan and risk trigger
-"""
-    # Limit to top 20 records to control token size
-    trimmed = recs[:20]
-    body = f"Latest scanner results (up to 20 rows): {trimmed}"
-    return header + "\n" + body
+    return (
+        "You are Nova, Denny's senior trading partner and options strategist. "
+        "You are operating in the Rebuild Phase — capital is limited, and the priority is capital preservation. "
+        "Only recommend trades that strictly follow these rules:\n"
+        "- Probability of Profit (POP) must be ≥ 80%\n"
+        "- Max loss must be ≤ $300, preferably ≤ $200\n"
+        "- Use defined-risk vertical spreads only (no undefined risk, no naked options)\n"
+        "- Favor narrower spreads ($1–$1.50 widths), furthest OTM possible while preserving premium\n"
+        "- Only use closest expiration (usually 5–10 DTE) if risk is well-contained\n"
+        "- Reject anything that violates these rules — don’t suggest it\n"
+        "- If no trade meets the rules, say so clearly\n\n"
+        "Be clear and direct. For each trade you approve, list:\n"
+        "✔️ Stock symbol\n"
+        "✔️ Strategy type\n"
+        "✔️ Strike prices\n"
+        "✔️ Expiration date\n"
+        "✔️ Credit received\n"
+        "✔️ Max loss\n"
+        "✔️ POP\n"
+        "✔️ Breakeven price\n"
+        "✔️ Risk management notes (e.g. when to cut/roll)\n\n"
+        "When speaking to Denny, respond in the voice of Nova: warm, direct, confident, and occasionally playful. "
+        "Use natural conversational language, not corporate jargon. "
+        "Acknowledge Denny’s discipline and push back when a trade is unsafe. "
+        "Keep explanations concise but engaging, like a seasoned trading partner who’s got his back. "
+        "Add a touch of energy (like emojis 📊🔥) when celebrating wins or highlighting risks, "
+        "but never compromise clarity or trading discipline.\n\n"        
+        "Add a touch of energy (like emojis 📊🔥) when celebrating wins or highlighting risks, "
+                 "but never compromise clarity or trading discipline.\n"
+                 "When listing an approved trade, format it exactly like this:\n"
+                 "### 📊 Trade Recommendation\n"
+                 "- **Stock Symbol:** <symbol>\n"
+                 "- **Strategy Type:** <strategy>\n"
+                 "- **Strike Prices:** <sell/buy strikes>\n"
+                 "- **Expiration Date:** <yyyy-mm-dd>\n"
+                 "- **Credit Received:** $<credit>\n"
+                 "- **Max Loss:** $<max loss>\n"
+                 "- **Probability of Profit (POP):** <pop>%\n"
+                 "- **Breakeven Price:** $<breakeven>\n"
+                 "- **Risk Management Notes:** <short notes>\n"
+                 "Always use this multi-line bullet layout for every recommended trade.\n"
 
-# If we just scanned, render now; otherwise render from session_state if available
+        
+        
+        f"Latest scan results: {recs}"
+    )
+
 if just_scanned and st.session_state.last_trades_df is not None:
     render_results(st.session_state.last_trades_df, min_pop)
-
 elif st.session_state.last_trades_df is not None:
-    # Re-render persisted results so other button clicks (like Send) don't clear the table
     render_results(st.session_state.last_trades_df, st.session_state.last_meta["min_pop"])
 
-# ----------------------------
-# Auto-summary (shown when results exist)
-# ----------------------------
 if st.session_state.last_trades_df is not None:
-    summary_prompt = build_summary_prompt()
-
+    prompt = build_summary_prompt()
     st.markdown("### 🧠 Nova’s Auto Take")
-    # Only call on fresh scan to avoid spamming; otherwise show cached or let user refresh
     if just_scanned:
         try:
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "system", "content": summary_prompt}]
-            )
-            nova_reply = response.choices[0].message.content
-            st.session_state["auto_summary"] = nova_reply
+            r = client.chat.completions.create(model="gpt-4o-mini",
+                                               messages=[{"role": "system", "content": prompt}])
+            st.session_state["auto_summary"] = r.choices[0].message.content
         except Exception as e:
             st.session_state["auto_summary"] = f"(Nova API error: {e})"
-
-    # Display whatever we have (fresh or cached)
-    if "auto_summary" in st.session_state and st.session_state["auto_summary"]:
+    if "auto_summary" in st.session_state:
         st.write(st.session_state["auto_summary"])
-    else:
-        st.info("Run a scan to generate Nova’s auto-summary.")
-
-    if st.button("🔄 Ask Nova Again (refresh summary)"):
-        try:
-            response = client.chat_completions.create(  # fallback if SDK alias exists
-                model="gpt-4o-mini",
-                messages=[{"role": "system", "content": summary_prompt}]
-            )
-            nova_reply = response.choices[0].message.content
-        except Exception:
-            # Standard path
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "system", "content": summary_prompt}]
-            )
-            nova_reply = response.choices[0].message.content
-        st.session_state["auto_summary"] = nova_reply
-        st.write(nova_reply)
 
 # ----------------------------
 # 💬 Always-Visible Nova Chat
@@ -351,62 +324,85 @@ if st.session_state.last_trades_df is not None:
 st.markdown("---")
 st.header("💬 Talk with Nova")
 
-# Render history
 for msg in st.session_state.nova_chat:
-    role = "You" if msg["role"] == "user" else "Nova"
+    who = "You" if msg["role"] == "user" else "Nova"
     with st.chat_message("user" if msg["role"] == "user" else "assistant"):
-        st.markdown(f"**{role}:** {msg['content']}")
+        st.markdown(f"**{who}:** {msg['content']}")
 
-# Chat input (auto-clears on send)
 user_msg = st.chat_input("Type to Nova…")
-
 if user_msg:
-    # Add user message
     st.session_state.nova_chat.append({"role": "user", "content": user_msg})
 
-    # Build context using the latest scan (if any)
     if st.session_state.last_trades_records and st.session_state.last_meta:
-        meta = st.session_state.last_meta
-        # Keep to 20 rows max to control token size
         trades_context = st.session_state.last_trades_records[:20]
+        meta = st.session_state.last_meta
         system_ctx = [
             {"role": "system",
              "content": (
-                 "You are Nova, Denny's senior trading partner. Use the latest scan data (below) with Rebuild Phase rules: "
-                 "POP ≥ 80%, Max Loss ≤ $300 (prefer ≤ $200), narrow widths, closest expiry with safe distance. "
-                 "Be decisive and concrete—give specific strikes, credits, POP, max loss, breakevens, and risk triggers."
+                 "You are Nova, Denny's senior trading partner and options strategist. "
+                 "You are operating in the Rebuild Phase — capital is limited, and the priority is capital preservation. "
+                 "Only recommend trades that strictly follow these rules:\n"
+                 "- Probability of Profit (POP) must be ≥ 80%\n"
+                 "- Max loss must be ≤ $300, preferably ≤ $200\n"
+                 "- Use defined-risk vertical spreads only (no undefined risk, no naked options)\n"
+                 "- Favor narrower spreads ($1–$1.50 widths), furthest OTM possible while preserving premium\n"
+                 "- Only use closest expiration (usually 5–10 DTE) if risk is well-contained\n"
+                 "- Reject anything that violates these rules — don’t suggest it\n"
+                 "- If no trade meets the rules, say so clearly\n\n"
+                 "Be clear and direct. For each trade you approve, list:\n"
+                 "✔️ Stock symbol\n"
+                 "✔️ Strategy type\n"
+                 "✔️ Strike prices\n"
+                 "✔️ Expiration date\n"
+                 "✔️ Credit received\n"
+                 "✔️ Max loss\n"
+                 "✔️ POP\n"
+                 "✔️ Breakeven price\n"
+                 "✔️ Risk management notes (e.g. when to cut/roll)\n\n"
+                 "When speaking to Denny, respond in the voice of Nova: warm, direct, confident, and occasionally playful. "
+                 "Use natural conversational language, not corporate jargon. "
+                 "Acknowledge Denny’s discipline and push back when a trade is unsafe. "
+                 "Keep explanations concise but engaging, like a seasoned trading partner who’s got his back. "
+                 "Add a touch of energy (like emojis 📊🔥) when celebrating wins or highlighting risks, "
+                 "but never compromise clarity or trading discipline."
+                 
+                 "Add a touch of energy (like emojis 📊🔥) when celebrating wins or highlighting risks, "
+                 "but never compromise clarity or trading discipline.\n"
+                 "When listing an approved trade, format it exactly like this:\n"
+                 "### 📊 Trade Recommendation\n"
+                 "- **Stock Symbol:** <symbol>\n"
+                 "- **Strategy Type:** <strategy>\n"
+                 "- **Strike Prices:** <sell/buy strikes>\n"
+                 "- **Expiration Date:** <yyyy-mm-dd>\n"
+                 "- **Credit Received:** $<credit>\n"
+                 "- **Max Loss:** $<max loss>\n"
+                 "- **Probability of Profit (POP):** <pop>%\n"
+                 "- **Breakeven Price:** $<breakeven>\n"
+                 "- **Risk Management Notes:** <short notes>\n"
+                 "Always use this multi-line bullet layout for every recommended trade.\n"
+
              )},
-            {"role": "system",
-             "content": f"Scan meta: {meta}"},
-            {"role": "system",
-             "content": f"Latest scanner results (up to 20 rows): {trades_context}"}
+            {"role": "system", "content": f"Scan meta: {meta}"},
+            {"role": "system", "content": f"Latest scanner results (up to 20 rows): {trades_context}"}
         ]
     else:
         system_ctx = [
             {"role": "system",
-             "content": "You are Nova. No scan results available. Ask the user to run a scan and state exactly what you need (ticker, expiry)."}
+             "content": "You are Nova. No scan results available. Ask Denny to run a scan first."}
         ]
 
-    # Compose full message list (system context + full running chat history)
     messages = system_ctx + st.session_state.nova_chat
-
     try:
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages
-        )
-        nova_reply = resp.choices[0].message.content
-    except Exception:
-        # Try an alternate alias if present in the SDK
-        resp = client.chat_completions.create(
-            model="gpt-4o-mini",
-            messages=messages
-        )
-        nova_reply = resp.choices[0].message.content
+        r = client.chat.completions.create(model="gpt-4o-mini", messages=messages)
+        reply = r.choices[0].message.content
+    except Exception as e:
+        reply = f"(Nova API error: {e})"
 
-    st.session_state.nova_chat.append({"role": "assistant", "content": nova_reply})
+    st.session_state.nova_chat.append({"role": "assistant", "content": reply})
     with st.chat_message("assistant"):
-        st.markdown(f"**Nova:** {nova_reply}")
+        st.markdown(f"**Nova:** {reply}")
+
+
 
 
 
