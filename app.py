@@ -40,6 +40,8 @@ if "last_trades_records" not in st.session_state:
     st.session_state.last_trades_records = None
 if "last_meta" not in st.session_state:
     st.session_state.last_meta = None
+if "auto_summary" not in st.session_state:
+    st.session_state.auto_summary = None
 
 # ----------------------------
 # Scanner UI
@@ -63,8 +65,7 @@ if not exp_dates:
 
 max_width = st.slider("Max Spread Width ($)", 0.5, 5.0, 2.5, 0.5)
 max_loss  = st.slider("Max Loss ($)", 50, 1000, 550, 50)
-# ⬇️ Changed min_pop slider floor from 50 → 0
-min_pop   = st.slider("Minimum POP (%)", 0, 95, 70, 1)
+min_pop   = st.slider("Minimum POP (%)", 0, 95, 70, 1)  # ✅ slider starts at 0 now
 contracts = st.slider("Contracts", 1, 10, 1)
 
 raw_mode   = st.checkbox("🔎 Show Raw (ignore filters)")
@@ -82,14 +83,14 @@ if st.button("Scan") and expiry_selected:
         T = dte / 365.0
 
         if spread_type == "Bull Put":
-            puts = clean_chain(opt_chain.puts)        # ✅ clean first
+            puts = clean_chain(opt_chain.puts)
             trades, _ = scan_verticals(
                 puts, spot_price, expiry_selected,
                 dte, T, max_width, max_loss, min_pop,
                 raw_mode, "put", contracts
             )
         elif spread_type == "Bear Call":
-            calls = clean_chain(opt_chain.calls)      # ✅ clean first
+            calls = clean_chain(opt_chain.calls)
             trades, _ = scan_verticals(
                 calls, spot_price, expiry_selected,
                 dte, T, max_width, max_loss, min_pop,
@@ -117,6 +118,11 @@ if st.button("Scan") and expiry_selected:
             }
             just_scanned = True
         else:
+            # ✅ Clear old results + summary
+            st.session_state.last_trades_df = None
+            st.session_state.last_trades_records = None
+            st.session_state.last_meta = None
+            st.session_state.auto_summary = None
             st.warning("⚠️ No trades passed filters.")
 
 # ----------------------------
@@ -153,11 +159,11 @@ if st.session_state.last_trades_df is not None:
                 model="gpt-4o-mini",
                 messages=[{"role": "system", "content": prompt}]
             )
-            st.session_state["auto_summary"] = r.choices[0].message.content
+            st.session_state.auto_summary = r.choices[0].message.content
         except Exception as e:
-            st.session_state["auto_summary"] = f"(Nova API error: {e})"
-    if "auto_summary" in st.session_state:
-        st.write(st.session_state["auto_summary"])
+            st.session_state.auto_summary = f"(Nova API error: {e})"
+    if st.session_state.auto_summary:
+        st.write(st.session_state.auto_summary)
 
 # ----------------------------
 # 💬 Always-Visible Nova Chat
@@ -192,6 +198,9 @@ if user_msg:
     st.session_state.nova_chat.append({"role": "assistant", "content": reply})
     with st.chat_message("assistant"):
         st.markdown(f"**Nova:** {reply}")
+
+
+
 
 
 
