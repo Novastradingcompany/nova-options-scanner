@@ -65,7 +65,7 @@ if not exp_dates:
 
 max_width = st.slider("Max Spread Width ($)", 0.5, 5.0, 2.5, 0.5)
 max_loss  = st.slider("Max Loss ($)", 50, 1000, 550, 50)
-min_pop   = st.slider("Minimum POP (%)", 0, 95, 70, 1)  # ✅ slider starts at 0 now
+min_pop   = st.slider("Minimum POP (%)", 0, 95, 70, 1)
 contracts = st.slider("Contracts", 1, 10, 1)
 
 raw_mode   = st.checkbox("🔎 Show Raw (ignore filters)")
@@ -118,7 +118,6 @@ if st.button("Scan") and expiry_selected:
             }
             just_scanned = True
         else:
-            # ✅ Clear old results + summary
             st.session_state.last_trades_df = None
             st.session_state.last_trades_records = None
             st.session_state.last_meta = None
@@ -130,10 +129,14 @@ if st.button("Scan") and expiry_selected:
 # ----------------------------
 def render_results(trades_df, min_pop_val):
     available = [c for c in [
-        "Strategy","Expiry","DTE","Trade","Width ($)",
-        "Credit ($)","Max Loss ($)","POP %","Breakeven",
-        "Distance %","Delta","Contracts","Spot"
+        "Strategy","Expiry","DTE","Trade",
+        "Credit (Realistic)","Credit ($)","Max Loss ($)",
+        "POP %","Breakeven","Distance %","Contracts","Spot"
     ] if c in trades_df.columns]
+
+    # Sort by realistic credit if present
+    if "Credit (Realistic)" in trades_df.columns:
+        trades_df = trades_df.sort_values(by="Credit (Realistic)", ascending=False)
 
     st.success(f"✅ Found {len(trades_df)} {st.session_state.last_meta['strategy']} candidates")
     st.dataframe(style_table(trades_df[available], min_pop_val), width="stretch")
@@ -198,6 +201,10 @@ if user_msg:
     st.session_state.nova_chat.append({"role": "assistant", "content": reply})
     with st.chat_message("assistant"):
         st.markdown(f"**Nova:** {reply}")
+
+
+
+
 
 
 
