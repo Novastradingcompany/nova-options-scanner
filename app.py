@@ -52,6 +52,9 @@ if "auto_summary" not in st.session_state:
 # Scanner UI
 # ----------------------------
 st.title("📊 Nova Options Scanner")
+st.caption("Version 2025-10-03")
+
+
 
 ticker_input = st.text_input("Enter Ticker Symbol", "NVDA").upper()
 exp_dates, spot_price = [], None

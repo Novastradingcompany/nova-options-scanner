@@ -8,7 +8,18 @@ from openai import OpenAI
 
 # 🔗 Nova shared modules
 from nova_rules import NOVA_RULES
-from nova_utils import scan_verticals, style_table
+from nova_utils import scan_verticals, scan_condors, style_table
+
+# ----------------------------
+# Clean option chain data
+# ----------------------------
+def clean_chain(df):
+    df = df.copy()
+    df = df[(df["bid"] >= 0.01) & (df["ask"] >= 0.01)]  # remove zero/garbage
+    df = df[df["ask"] >= df["bid"]]  # skip inverted markets
+    if "openInterest" in df.columns:
+        df = df[df["openInterest"] > 0]
+    return df
 
 # ----------------------------
 # Page + API init
@@ -29,6 +40,8 @@ if "last_trades_records" not in st.session_state:
     st.session_state.last_trades_records = None
 if "last_meta" not in st.session_state:
     st.session_state.last_meta = None
+if "auto_summary" not in st.session_state:
+    st.session_state.auto_summary = None
 
 # ----------------------------
 # Scanner UI
@@ -52,7 +65,7 @@ if not exp_dates:
 
 max_width = st.slider("Max Spread Width ($)", 0.5, 5.0, 2.5, 0.5)
 max_loss  = st.slider("Max Loss ($)", 50, 1000, 550, 50)
-min_pop   = st.slider("Minimum POP (%)", 50, 95, 70, 1)
+min_pop   = st.slider("Minimum POP (%)", 0, 95, 70, 1)
 contracts = st.slider("Contracts", 1, 10, 1)
 
 raw_mode   = st.checkbox("🔎 Show Raw (ignore filters)")
@@ -70,19 +83,25 @@ if st.button("Scan") and expiry_selected:
         T = dte / 365.0
 
         if spread_type == "Bull Put":
-            trades, _ = scan_verticals(opt_chain.puts, spot_price, expiry_selected,
-                                       dte, T, max_width, max_loss, min_pop,
-                                       raw_mode, "put", contracts)
+            puts = clean_chain(opt_chain.puts)
+            trades, _ = scan_verticals(
+                puts, spot_price, expiry_selected,
+                dte, T, max_width, max_loss, min_pop,
+                raw_mode, "put", contracts
+            )
         elif spread_type == "Bear Call":
-            trades, _ = scan_verticals(opt_chain.calls, spot_price, expiry_selected,
-                                       dte, T, max_width, max_loss, min_pop,
-                                       raw_mode, "call", contracts)
+            calls = clean_chain(opt_chain.calls)
+            trades, _ = scan_verticals(
+                calls, spot_price, expiry_selected,
+                dte, T, max_width, max_loss, min_pop,
+                raw_mode, "call", contracts
+            )
         else:
-            # Iron condor reuses scan_verticals inside nova_utils if you later add it
-            from nova_utils import scan_condors
-            trades = scan_condors(opt_chain, spot_price, expiry_selected,
-                                  dte, T, max_width, max_loss, min_pop,
-                                  raw_mode, contracts)
+            trades = scan_condors(
+                opt_chain, spot_price, expiry_selected,
+                dte, T, max_width, max_loss, min_pop,
+                raw_mode, contracts
+            )
 
         if trades is not None and not trades.empty:
             trades["Symbol"] = ticker_input
@@ -99,18 +118,24 @@ if st.button("Scan") and expiry_selected:
             }
             just_scanned = True
         else:
+            st.session_state.last_trades_df = None
+            st.session_state.last_trades_records = None
+            st.session_state.last_meta = None
+            st.session_state.auto_summary = None
             st.warning("⚠️ No trades passed filters.")
 
 # ----------------------------
 # Display Results & Auto-Summary
 # ----------------------------
 def render_results(trades_df, min_pop_val):
-    cols = ["Strategy","Expiry","DTE","Trade","Width ($)","Credit ($)",
-            "Max Loss ($)","POP %","Breakeven","Distance %","Delta","Contracts"]
-    if "Spot" in trades_df.columns:
-        cols.append("Spot")
+    available = [c for c in [
+        "Strategy","Expiry","DTE","Trade",
+        "Credit ($)","Max Loss ($)","POP %","Breakeven",
+        "Distance %","Delta","Contracts","Spot"
+    ] if c in trades_df.columns]
+
     st.success(f"✅ Found {len(trades_df)} {st.session_state.last_meta['strategy']} candidates")
-    st.dataframe(style_table(trades_df[cols], min_pop_val), width="stretch")
+    st.dataframe(style_table(trades_df[available], min_pop_val), width="stretch")
 
 def build_summary_prompt():
     meta = st.session_state.last_meta
@@ -133,11 +158,11 @@ if st.session_state.last_trades_df is not None:
                 model="gpt-4o-mini",
                 messages=[{"role": "system", "content": prompt}]
             )
-            st.session_state["auto_summary"] = r.choices[0].message.content
+            st.session_state.auto_summary = r.choices[0].message.content
         except Exception as e:
-            st.session_state["auto_summary"] = f"(Nova API error: {e})"
-    if "auto_summary" in st.session_state:
-        st.write(st.session_state["auto_summary"])
+            st.session_state.auto_summary = f"(Nova API error: {e})"
+    if st.session_state.auto_summary:
+        st.write(st.session_state.auto_summary)
 
 # ----------------------------
 # 💬 Always-Visible Nova Chat
@@ -172,6 +197,21 @@ if user_msg:
     st.session_state.nova_chat.append({"role": "assistant", "content": reply})
     with st.chat_message("assistant"):
         st.markdown(f"**Nova:** {reply}")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
