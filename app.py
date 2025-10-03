@@ -24,7 +24,12 @@ def clean_chain(df):
 # ----------------------------
 # Page + API init
 # ----------------------------
-st.set_page_config(page_title="Nova Options Scanner", layout="centered")
+st.set_page_config(
+    page_title="Nova Options Scanner",
+    page_icon="favicon.png",   # ✅ uses your favicon
+    layout="centered"
+)
+
 
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
