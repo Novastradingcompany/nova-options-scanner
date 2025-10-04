@@ -24,7 +24,11 @@ def clean_chain(df):
 # ----------------------------
 # Page + API init
 # ----------------------------
-st.set_page_config(page_title="Nova Options Scanner", layout="centered")
+st.set_page_config(
+    page_title="Nova Options Scanner",
+    page_icon="favicon.png",   # ✅ uses your favicon
+    layout="centered"
+)
 
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -47,6 +51,7 @@ if "auto_summary" not in st.session_state:
 # Scanner UI
 # ----------------------------
 st.title("📊 Nova Options Scanner")
+st.caption("Version 2025-10-04")
 
 ticker_input = st.text_input("Enter Ticker Symbol", "NVDA").upper()
 exp_dates, spot_price = [], None
@@ -96,9 +101,12 @@ if st.button("Scan") and expiry_selected:
                 dte, T, max_width, max_loss, min_pop,
                 raw_mode, "call", contracts
             )
-        else:
-            trades = scan_condors(
-                opt_chain, spot_price, expiry_selected,
+        else:  # ✅ Iron Condor
+            puts = clean_chain(opt_chain.puts)
+            calls = clean_chain(opt_chain.calls)
+            trades, _ = scan_condors(
+                {"puts": puts, "calls": calls},  # pass clean legs
+                spot_price, expiry_selected,
                 dte, T, max_width, max_loss, min_pop,
                 raw_mode, contracts
             )
@@ -130,9 +138,12 @@ if st.button("Scan") and expiry_selected:
 def render_results(trades_df, min_pop_val):
     available = [c for c in [
         "Strategy","Expiry","DTE","Trade",
-        "Credit ($)","Max Loss ($)","POP %","Breakeven",
-        "Distance %","Delta","Contracts","Spot"
+        "Credit (Realistic)","Credit ($)","Max Loss ($)",
+        "POP %","Breakeven","Distance %","Contracts","Spot"
     ] if c in trades_df.columns]
+
+    if "Credit (Realistic)" in trades_df.columns:
+        trades_df = trades_df.sort_values(by="Credit (Realistic)", ascending=False)
 
     st.success(f"✅ Found {len(trades_df)} {st.session_state.last_meta['strategy']} candidates")
     st.dataframe(style_table(trades_df[available], min_pop_val), width="stretch")
@@ -197,6 +208,10 @@ if user_msg:
     st.session_state.nova_chat.append({"role": "assistant", "content": reply})
     with st.chat_message("assistant"):
         st.markdown(f"**Nova:** {reply}")
+
+
+
+
 
 
 

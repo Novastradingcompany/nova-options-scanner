@@ -57,17 +57,14 @@ def scan_verticals(chain, spot_price, expiry, dte, T,
         # --- credit calculations ---
         credit_mid = (sell_mid - buy_mid) * contracts * 100
         credit_realistic = max((sell_leg["bid"] - buy_leg["ask"]) * contracts * 100, 0)
-
         if credit_realistic <= 0 and credit_mid <= 0:
             continue
 
-        # Use realistic credit if positive, otherwise fallback to mid
         effective_credit = credit_realistic if credit_realistic > 0 else credit_mid
-
         max_loss_val = calc_max_loss(width, effective_credit, contracts)
         breakeven = calc_breakeven(sell_leg["strike"], effective_credit, opt_type)
 
-        # --- POP using nova_math ---
+        # --- POP ---
         pop = calc_pop(
             short_strike=sell_leg["strike"],
             spot=spot_price,
@@ -77,24 +74,6 @@ def scan_verticals(chain, spot_price, expiry, dte, T,
             opt_type=opt_type,
             delta=sell_leg.get("delta", None)
         )
-
-        # --- DEBUG print only if raw_mode checked ---
-        if raw_mode:
-            print("DEBUG CANDIDATE:", {
-                "opt_type": opt_type,
-                "sell_strike": float(sell_leg["strike"]),
-                "buy_strike": float(buy_leg["strike"]),
-                "sell_bid": float(sell_leg["bid"]),
-                "sell_ask": float(sell_leg["ask"]),
-                "buy_bid": float(buy_leg["bid"]),
-                "buy_ask": float(buy_leg["ask"]),
-                "sell_mid": round(sell_mid, 3),
-                "buy_mid": round(buy_mid, 3),
-                "credit_mid": round(credit_mid, 2),
-                "credit_realistic": round(credit_realistic, 2),
-                "max_loss": round(max_loss_val, 2),
-                "pop": round(pop, 2)
-            })
 
         if not raw_mode:
             if max_loss_val > max_loss or pop < min_pop:
@@ -119,20 +98,69 @@ def scan_verticals(chain, spot_price, expiry, dte, T,
     return pd.DataFrame(trades), None
 
 # ----------------------------
-# Dummy Iron Condor scanner
+# Iron Condor scanner
 # ----------------------------
-def scan_condors(*args, **kwargs):
-    return pd.DataFrame(), None
+def scan_condors(chain, spot_price, expiry, dte, T,
+                 max_width, max_loss, min_pop,
+                 raw_mode, contracts=1):
+    """
+    Build iron condors by combining a bull put and bear call spread.
+    Accepts either a yfinance OptionChain object or a dict with 'puts' and 'calls'.
+    """
+    # ✅ handle both dict and yfinance OptionChain
+    if isinstance(chain, dict):
+        puts = chain["puts"].reset_index(drop=True)
+        calls = chain["calls"].reset_index(drop=True)
+    else:
+        puts = chain.puts.reset_index(drop=True)
+        calls = chain.calls.reset_index(drop=True)
+
+    condors = []
+
+    # Generate bull put legs
+    put_trades, _ = scan_verticals(
+        puts, spot_price, expiry, dte, T,
+        max_width, max_loss, min_pop,
+        True, "put", contracts
+    )
+    # Generate bear call legs
+    call_trades, _ = scan_verticals(
+        calls, spot_price, expiry, dte, T,
+        max_width, max_loss, min_pop,
+        True, "call", contracts
+    )
+
+    for _, put_row in put_trades.iterrows():
+        for _, call_row in call_trades.iterrows():
+            total_credit = put_row["Credit ($)"] + call_row["Credit ($)"]
+            total_max_loss = max(put_row["Max Loss ($)"], call_row["Max Loss ($)"])
+            avg_pop = (put_row["POP %"] + call_row["POP %"]) / 2
+
+            if not raw_mode:
+                if total_max_loss > max_loss or avg_pop < min_pop:
+                    continue
+
+            condors.append({
+                "Strategy": "Iron Condor",
+                "Expiry": expiry,
+                "DTE": dte,
+                "Trade": f"{put_row['Trade']} + {call_row['Trade']}",
+                "Credit ($)": total_credit,
+                "Max Loss ($)": total_max_loss,
+                "POP %": avg_pop,
+                "Contracts": contracts,
+                "Spot": round(spot_price, 2)
+            })
+
+    return pd.DataFrame(condors), None
 
 # ----------------------------
-# Style table with $ and %
+# Style table
 # ----------------------------
 def style_table(df, min_pop_val):
     if df is None or df.empty:
         return pd.DataFrame()
-
     df = df.copy()
-
     if "Credit ($)" in df.columns:
         df["Credit ($)"] = df["Credit ($)"].map(lambda x: f"${x:,.2f}")
     if "Credit (Realistic)" in df.columns:
@@ -145,14 +173,11 @@ def style_table(df, min_pop_val):
         df["POP %"] = df["POP %"].map(lambda x: f"{x:.1f}%")
     if "Distance %" in df.columns:
         df["Distance %"] = df["Distance %"].map(lambda x: f"{x:.1f}%")
+    return df.style
 
-    styler = df.style
-    if "POP %" in df.columns:
-        styler = styler.map(
-            lambda v: "color: green" if isinstance(v, str) and v.endswith("%") and float(v.strip('%')) >= min_pop_val else "",
-            subset=["POP %"]
-        )
-    return styler
+
+
+
 
 
 

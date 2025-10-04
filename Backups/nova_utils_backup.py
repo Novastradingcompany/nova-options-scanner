@@ -54,42 +54,30 @@ def scan_verticals(chain, spot_price, expiry, dte, T,
         if opt_type == "call" and sell_leg["strike"] <= spot_price:
             continue
 
-        # --- credit & max loss ---
-        credit = calc_credit(sell_mid, buy_mid, contracts)
-        if credit <= 0:
+        # --- credit calculations ---
+        credit_mid = (sell_mid - buy_mid) * contracts * 100
+        credit_realistic = max((sell_leg["bid"] - buy_leg["ask"]) * contracts * 100, 0)
+
+        if credit_realistic <= 0 and credit_mid <= 0:
             continue
 
-        max_loss_val = calc_max_loss(width, credit, contracts)
-        breakeven = calc_breakeven(sell_leg["strike"], credit, opt_type)
+        effective_credit = credit_realistic if credit_realistic > 0 else credit_mid
+
+        max_loss_val = calc_max_loss(width, effective_credit, contracts)
+        breakeven = calc_breakeven(sell_leg["strike"], effective_credit, opt_type)
 
         # --- POP using nova_math ---
         pop = calc_pop(
             short_strike=sell_leg["strike"],
             spot=spot_price,
             width=width,
-            credit=credit,
+            credit=effective_credit,
             max_loss=max_loss_val,
             opt_type=opt_type,
             delta=sell_leg.get("delta", None)
         )
 
-        # --- DEBUG print ---
-        if raw_mode:
-            print("DEBUG CANDIDATE:", {
-                "opt_type": opt_type,
-                "sell_strike": float(sell_leg["strike"]),
-                "buy_strike": float(buy_leg["strike"]),
-                "sell_bid": float(sell_leg["bid"]),
-                "sell_ask": float(sell_leg["ask"]),
-                "buy_bid": float(buy_leg["bid"]),
-                "buy_ask": float(buy_leg["ask"]),
-                "sell_mid": round(sell_mid, 3),
-                "buy_mid": round(buy_mid, 3),
-                "credit": round(credit, 2),
-                "max_loss": round(max_loss_val, 2),
-                "pop": round(pop, 2)
-            })
-
+        # --- Filter if not in raw mode ---
         if not raw_mode:
             if max_loss_val > max_loss or pop < min_pop:
                 continue
@@ -99,8 +87,8 @@ def scan_verticals(chain, spot_price, expiry, dte, T,
             "Expiry": expiry,
             "DTE": dte,
             "Trade": f"Sell {sell_leg['strike']} / Buy {buy_leg['strike']} {opt_type.upper()}",
-            "Width ($)": round(width, 2),
-            "Credit ($)": credit,
+            "Credit ($)": round(credit_mid, 2),
+            "Credit (Realistic)": round(credit_realistic, 2),
             "Max Loss ($)": max_loss_val,
             "POP %": pop,
             "Breakeven": breakeven,
@@ -127,9 +115,10 @@ def style_table(df, min_pop_val):
 
     df = df.copy()
 
-    # Format currency & percent columns
     if "Credit ($)" in df.columns:
         df["Credit ($)"] = df["Credit ($)"].map(lambda x: f"${x:,.2f}")
+    if "Credit (Realistic)" in df.columns:
+        df["Credit (Realistic)"] = df["Credit (Realistic)"].map(lambda x: f"${x:,.2f}")
     if "Max Loss ($)" in df.columns:
         df["Max Loss ($)"] = df["Max Loss ($)"].map(lambda x: f"${x:,.2f}")
     if "Breakeven" in df.columns:
@@ -139,14 +128,10 @@ def style_table(df, min_pop_val):
     if "Distance %" in df.columns:
         df["Distance %"] = df["Distance %"].map(lambda x: f"{x:.1f}%")
 
-    # Highlight POP meeting threshold
-    styler = df.style
-    if "POP %" in df.columns:
-        styler = styler.map(
-            lambda v: "color: green" if isinstance(v, str) and v.endswith("%") and float(v.strip("%")) >= min_pop_val else "",
-            subset=["POP %"]
-        )
-    return styler
+    return df.style
+
+
+
 
 
 
