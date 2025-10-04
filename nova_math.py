@@ -83,3 +83,4 @@ def calc_pop(short_strike, spot, width, credit, max_loss, opt_type, delta=None, 
 
 
 
+
