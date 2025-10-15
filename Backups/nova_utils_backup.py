@@ -57,16 +57,14 @@ def scan_verticals(chain, spot_price, expiry, dte, T,
         # --- credit calculations ---
         credit_mid = (sell_mid - buy_mid) * contracts * 100
         credit_realistic = max((sell_leg["bid"] - buy_leg["ask"]) * contracts * 100, 0)
-
         if credit_realistic <= 0 and credit_mid <= 0:
             continue
 
         effective_credit = credit_realistic if credit_realistic > 0 else credit_mid
-
         max_loss_val = calc_max_loss(width, effective_credit, contracts)
         breakeven = calc_breakeven(sell_leg["strike"], effective_credit, opt_type)
 
-        # --- POP using nova_math ---
+        # --- POP ---
         pop = calc_pop(
             short_strike=sell_leg["strike"],
             spot=spot_price,
@@ -77,7 +75,6 @@ def scan_verticals(chain, spot_price, expiry, dte, T,
             delta=sell_leg.get("delta", None)
         )
 
-        # --- Filter if not in raw mode ---
         if not raw_mode:
             if max_loss_val > max_loss or pop < min_pop:
                 continue
@@ -101,18 +98,68 @@ def scan_verticals(chain, spot_price, expiry, dte, T,
     return pd.DataFrame(trades), None
 
 # ----------------------------
-# Dummy Iron Condor scanner
+# Iron Condor scanner
 # ----------------------------
-def scan_condors(*args, **kwargs):
-    return pd.DataFrame(), None
+def scan_condors(chain, spot_price, expiry, dte, T,
+                 max_width, max_loss, min_pop,
+                 raw_mode, contracts=1):
+    """
+    Build iron condors by combining a bull put and bear call spread.
+    Accepts either a yfinance OptionChain object or a dict with 'puts' and 'calls'.
+    """
+    # ✅ handle both dict and yfinance OptionChain
+    if isinstance(chain, dict):
+        puts = chain["puts"].reset_index(drop=True)
+        calls = chain["calls"].reset_index(drop=True)
+    else:
+        puts = chain.puts.reset_index(drop=True)
+        calls = chain.calls.reset_index(drop=True)
+
+    condors = []
+
+    # Generate bull put legs
+    put_trades, _ = scan_verticals(
+        puts, spot_price, expiry, dte, T,
+        max_width, max_loss, min_pop,
+        True, "put", contracts
+    )
+    # Generate bear call legs
+    call_trades, _ = scan_verticals(
+        calls, spot_price, expiry, dte, T,
+        max_width, max_loss, min_pop,
+        True, "call", contracts
+    )
+
+    for _, put_row in put_trades.iterrows():
+        for _, call_row in call_trades.iterrows():
+            total_credit = put_row["Credit ($)"] + call_row["Credit ($)"]
+            total_max_loss = max(put_row["Max Loss ($)"], call_row["Max Loss ($)"])
+            avg_pop = (put_row["POP %"] + call_row["POP %"]) / 2
+
+            if not raw_mode:
+                if total_max_loss > max_loss or avg_pop < min_pop:
+                    continue
+
+            condors.append({
+                "Strategy": "Iron Condor",
+                "Expiry": expiry,
+                "DTE": dte,
+                "Trade": f"{put_row['Trade']} + {call_row['Trade']}",
+                "Credit ($)": total_credit,
+                "Max Loss ($)": total_max_loss,
+                "POP %": avg_pop,
+                "Contracts": contracts,
+                "Spot": round(spot_price, 2)
+            })
+
+    return pd.DataFrame(condors), None
 
 # ----------------------------
-# Style table with $ and %
+# Style table
 # ----------------------------
 def style_table(df, min_pop_val):
     if df is None or df.empty:
         return pd.DataFrame()
-
     df = df.copy()
 
     if "Credit ($)" in df.columns:
@@ -122,13 +169,22 @@ def style_table(df, min_pop_val):
     if "Max Loss ($)" in df.columns:
         df["Max Loss ($)"] = df["Max Loss ($)"].map(lambda x: f"${x:,.2f}")
     if "Breakeven" in df.columns:
-        df["Breakeven"] = df["Breakeven"].map(lambda x: f"${x:,.2f}")
+        df["Breakeven"] = df["Breakeven"].map(lambda x: f"${x:,.2f}" if isinstance(x, (int, float)) else x)
     if "POP %" in df.columns:
-        df["POP %"] = df["POP %"].map(lambda x: f"{x:.1f}%")
+        df["POP %"] = df["POP %"].map(lambda x: f"{x:.1f}%" if isinstance(x, (int, float)) else x)
     if "Distance %" in df.columns:
-        df["Distance %"] = df["Distance %"].map(lambda x: f"{x:.1f}%")
+        df["Distance %"] = df["Distance %"].map(lambda x: f"{x:.1f}%" if isinstance(x, (int, float)) else x)
+    if "Spot" in df.columns:
+        df["Spot"] = df["Spot"].apply(
+            lambda x: f"${float(x):,.2f}" if str(x).replace('.', '', 1).isdigit() else x
+        )
 
     return df.style
+
+
+
+
+
 
 
 

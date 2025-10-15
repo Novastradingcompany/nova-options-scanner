@@ -161,6 +161,7 @@ def style_table(df, min_pop_val):
     if df is None or df.empty:
         return pd.DataFrame()
     df = df.copy()
+
     if "Credit ($)" in df.columns:
         df["Credit ($)"] = df["Credit ($)"].map(lambda x: f"${x:,.2f}")
     if "Credit (Realistic)" in df.columns:
@@ -168,12 +169,20 @@ def style_table(df, min_pop_val):
     if "Max Loss ($)" in df.columns:
         df["Max Loss ($)"] = df["Max Loss ($)"].map(lambda x: f"${x:,.2f}")
     if "Breakeven" in df.columns:
-        df["Breakeven"] = df["Breakeven"].map(lambda x: f"${x:,.2f}")
+        df["Breakeven"] = df["Breakeven"].map(lambda x: f"${x:,.2f}" if isinstance(x, (int, float)) else x)
     if "POP %" in df.columns:
-        df["POP %"] = df["POP %"].map(lambda x: f"{x:.1f}%")
+        df["POP %"] = df["POP %"].map(lambda x: f"{x:.1f}%" if isinstance(x, (int, float)) else x)
     if "Distance %" in df.columns:
-        df["Distance %"] = df["Distance %"].map(lambda x: f"{x:.1f}%")
+        df["Distance %"] = df["Distance %"].map(lambda x: f"{x:.1f}%" if isinstance(x, (int, float)) else x)
+    if "Spot" in df.columns:
+        df["Spot"] = df["Spot"].apply(
+            lambda x: f"${float(x):,.2f}" if str(x).replace('.', '', 1).isdigit() else x
+        )
+
     return df.style
+
+
+
 
 
 
