@@ -54,7 +54,7 @@ def _boot_state():
         "last_meta": None,
         "auto_summary": None,
         "last_query": None,
-        "total_credit_summary": 0.0,
+        "total_credit_summary": "",
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -66,7 +66,7 @@ def _reset_results():
     st.session_state.last_trades_records = None
     st.session_state.last_meta = None
     st.session_state.auto_summary = None
-    st.session_state.total_credit_summary = 0.0
+    st.session_state.total_credit_summary = ""
 
 
 _boot_state()
@@ -250,10 +250,7 @@ def render_results(trades_df: pd.DataFrame, min_pop_val: int):
     total_credit = df_display["Credit (Realistic)"].apply(
         lambda x: float(str(x).replace("$", "").replace(",", "")) if "$" in str(x) else float(x)
     ).sum()
-    st.session_state.total_credit_summary = format_credit_summary(
-        total_credit, st.session_state.last_meta["contracts"]
-    )
-
+   
     st.success(f"✅ Found {len(df_display)} {st.session_state.last_meta['strategy']} candidates")
     st.caption(st.session_state.total_credit_summary)
     st.dataframe(style_table(df_display[available], min_pop_val), width="stretch")
