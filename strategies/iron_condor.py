@@ -1,142 +1,157 @@
+# =======================================
+# strategies/iron_condor.py — Nova POP + TOS-style + Logging Debug
+# =======================================
+import re
+import logging
 import pandas as pd
 from core.math_utils import calc_credit, calc_max_loss, calc_breakeven, calc_pop
+from strategies.bull_put import scan_bull_put
+from strategies.bear_call import scan_bear_call
 
-# =========================================================
-# 🧩 Iron Condor Scanner (robust to stale bid/ask on one wing)
-# =========================================================
-def scan_iron_condor(chains, spot_price, expiry, dte, T,
-                     max_width, max_loss, min_pop,
-                     raw_mode, contracts=1):
+# ----------------------------
+# Logging setup (muted by default)
+# ----------------------------
+logging.basicConfig(format="%(message)s", level=logging.WARNING)
+log = logging.getLogger(__name__)
+
+# Helper to extract the two strikes from a "Sell X / Buy Y ..." string
+_STRIKE_RE = re.compile(r"Sell\s*([0-9.]+)\s*/\s*Buy\s*([0-9.]+)")
+
+
+def _extract_width(trade_str: str) -> float:
+    """Extract width between sell and buy strikes."""
+    m = _STRIKE_RE.search(str(trade_str))
+    if not m:
+        return 0.0
+    a, b = float(m.group(1)), float(m.group(2))
+    return abs(a - b)
+
+
+def _extract_sell_strike(trade_str: str) -> float:
+    """Extract the sell strike from a trade string."""
+    m = _STRIKE_RE.search(str(trade_str))
+    return float(m.group(1)) if m else 0.0
+
+
+def scan_iron_condor(chains: dict,
+                     spot_price: float,
+                     expiry: str,
+                     dte: int,
+                     T: float,
+                     max_width: float,
+                     max_loss: float,
+                     min_pop: float,
+                     raw_mode: bool,
+                     contracts: int = 1) -> pd.DataFrame:
     """
-    Build Iron Condors from put + call verticals.
-
-    Key rules:
-      - Put wing: short higher strike put, long lower strike put (both OTM)
-      - Call wing: short lower strike call, long higher strike call (both OTM)
-      - Credit side logic is tolerant: if realistic (bid/ask) credit <= 0, fall back to mid.
-      - Max loss = (max(put_width, call_width) * 100 * contracts) - total_credit
-      - Breakeven range uses TOTAL credit per share, not per-wing credit.
+    Scan Iron Condor setups by pairing Bull Put and Bear Call spreads:
+      - Uses Nova POP (Black–Scholes N(d2)) for both legs.
+      - Max loss per contract = wider side × 100 − total credit.
+      - POP is averaged from both legs for simplicity.
+      - Breakevens shown as "Lower / Upper".
     """
-    puts = chains["puts"].copy()
-    calls = chains["calls"].copy()
+    puts = chains.get("puts")
+    calls = chains.get("calls")
+    if puts is None or calls is None:
+        log.info("DEBUG: Iron Condor received missing puts/calls.")
+        return pd.DataFrame()
 
-    # guard against missing cols
-    for df in (puts, calls):
-        for col in ["bid", "ask", "strike"]:
-            if col not in df.columns:
-                return pd.DataFrame()
+    # Run both scanners in raw mode to get full candidate legs
+    df_puts = scan_bull_put(
+        puts, spot_price, expiry, dte, T,
+        max_width, max_loss, min_pop if not raw_mode else 0, True,
+        contracts
+    )
+    df_calls = scan_bear_call(
+        calls, spot_price, expiry, dte, T,
+        max_width, max_loss, min_pop if not raw_mode else 0, True,
+        contracts
+    )
 
-    # drop NaNs / zeros that break math
-    puts = puts.dropna(subset=["bid", "ask", "strike"])
-    calls = calls.dropna(subset=["bid", "ask", "strike"])
+    if df_puts is None or df_puts.empty or df_calls is None or df_calls.empty:
+        log.info("DEBUG: No legs found to build Iron Condors.")
+        return pd.DataFrame()
 
     trades = []
 
-    # ----------- iterate put wing -----------
-    for i in range(len(puts) - 1):
-        short_put = puts.iloc[i]
-        long_put  = puts.iloc[i + 1]
+    # Pair each reasonable put spread with each reasonable call spread
+    for _, put_leg in df_puts.iterrows():
+        for _, call_leg in df_calls.iterrows():
+            put_trade = str(put_leg["Trade"])
+            call_trade = str(call_leg["Trade"])
 
-        # ensure bull-put structure (short strike higher than long)
-        if short_put["strike"] < long_put["strike"]:
-            short_put, long_put = long_put, short_put
-
-        put_width = abs(short_put["strike"] - long_put["strike"])
-        if put_width <= 0 or put_width > max_width:
-            continue
-
-        # require OTM short put
-        if short_put["strike"] >= spot_price:
-            continue
-
-        # compute mid & realistic credits for put wing
-        sp_mid = (short_put["bid"] + short_put["ask"]) / 2
-        lp_mid = (long_put["bid"] + long_put["ask"]) / 2
-        put_credit_mid = calc_credit(sp_mid, lp_mid, contracts)
-        put_credit_real = calc_credit(short_put["bid"], long_put["ask"], contracts)
-        put_credit_eff = put_credit_real if put_credit_real > 0 else put_credit_mid
-
-        # if even mid credit isn't positive, skip the wing
-        if put_credit_mid <= 0:
-            continue
-
-        # ----------- iterate call wing -----------
-        for j in range(len(calls) - 1):
-            short_call = calls.iloc[j]
-            long_call  = calls.iloc[j + 1]
-
-            # ensure bear-call structure (short strike lower than long)
-            if short_call["strike"] > long_call["strike"]:
-                short_call, long_call = long_call, short_call
-
-            call_width = abs(long_call["strike"] - short_call["strike"])
-            if call_width <= 0 or call_width > max_width:
+            width_put = _extract_width(put_trade)
+            width_call = _extract_width(call_trade)
+            if width_put <= 0 or width_call <= 0:
                 continue
 
-            # require OTM short call
-            if short_call["strike"] <= spot_price:
-                continue
+            # --- Combined credit and losses
+            credit_put_pc = float(put_leg["Credit (Realistic)"])
+            credit_call_pc = float(call_leg["Credit (Realistic)"])
+            total_credit_pc = round(credit_put_pc + credit_call_pc, 2)
+            total_credit = round(total_credit_pc * contracts, 2)
 
-            # compute mid & realistic credits for call wing
-            sc_mid = (short_call["bid"] + short_call["ask"]) / 2
-            lc_mid = (long_call["bid"] + long_call["ask"]) / 2
-            call_credit_mid = calc_credit(sc_mid, lc_mid, contracts)
-            call_credit_real = calc_credit(short_call["bid"], long_call["ask"], contracts)
-            call_credit_eff = call_credit_real if call_credit_real > 0 else call_credit_mid
+            max_width_leg = max(width_put, width_call)
+            max_loss_pc = (max_width_leg * 100) - total_credit_pc
+            max_loss_total = round(max_loss_pc * contracts, 2)
 
-            # must have some positive mid credit for the call wing
-            if call_credit_mid <= 0:
-                continue
+            # --- POP: average of both legs’ POPs (Nova POP)
+            pop_put = float(put_leg["POP %"])
+            pop_call = float(call_leg["POP %"])
+            pop = round((pop_put + pop_call) / 2.0, 1)
 
-            # ---------- combine the wings ----------
-            total_credit_mid = put_credit_mid + call_credit_mid
-            total_credit_eff = put_credit_eff + call_credit_eff
+            # --- Breakevens
+            short_put = _extract_sell_strike(put_trade)
+            short_call = _extract_sell_strike(call_trade)
+            credit_per_share = total_credit_pc / 100.0
+            lower_be = round(short_put - credit_per_share, 2)
+            upper_be = round(short_call + credit_per_share, 2)
+            be_str = f"{lower_be} / {upper_be}"
 
-            # In raw mode, allow mid-credit > 0 even if effective ≤ 0
-            total_credit = total_credit_eff if (total_credit_eff > 0 or not raw_mode) else total_credit_mid
-            if total_credit <= 0:
-                continue
+            # --- Distance metric
+            dist_put = abs(spot_price - short_put) / spot_price * 100.0 if spot_price else 0.0
+            dist_call = abs(short_call - spot_price) / spot_price * 100.0 if spot_price else 0.0
+            distance_pct = round(min(dist_put, dist_call), 2)
 
-            # ✅ correct max loss: only the widest wing counts
-            max_width_used = max(put_width, call_width)
-            max_loss_val = calc_max_loss(max_width_used, total_credit, contracts)
-
-            # ✅ breakeven range uses TOTAL credit/share
-            credit_per_share = total_credit / (100 * contracts)
-            lower_breakeven = float(short_put["strike"]) - credit_per_share
-            upper_breakeven = float(short_call["strike"]) + credit_per_share
-
-            # ✅ POP estimate: average of wings (simple, consistent with earlier verticals)
-            pop_put = calc_pop(short_put["strike"], spot_price, put_width, put_credit_eff,
-                               max_loss_val, "put", short_put.get("delta", None), contracts=contracts)
-            pop_call = calc_pop(short_call["strike"], spot_price, call_width, call_credit_eff,
-                                max_loss_val, "call", short_call.get("delta", None), contracts=contracts)
-            pop_avg = round((pop_put + pop_call) / 2, 1)
-
-            # filters unless raw
+            # --- Apply filters (skip unqualified)
             if not raw_mode:
-                if max_loss_val > max_loss or pop_avg < min_pop:
+                if max_loss_total > float(max_loss) or pop < float(min_pop):
                     continue
 
+            # --- Debug output
+            log.info(
+                f"\nDEBUG IC PAIR:\n"
+                f"Put={put_trade} | Call={call_trade}\n"
+                f"Widths: P={width_put}, C={width_call} | MaxWidth={max_width_leg}\n"
+                f"Credit(pc)={total_credit_pc} | MaxLoss(pc)={round(max_loss_pc,2)} | POP={pop}%"
+            )
+
+            # --- Final append
             trades.append({
                 "Strategy": "Iron Condor",
                 "Expiry": expiry,
-                "DTE": dte,
-                "Trade": (
-                    f"Sell {short_put['strike']} / Buy {long_put['strike']} PUT + "
-                    f"Sell {short_call['strike']} / Buy {long_call['strike']} CALL"
-                ),
-                # keep both credits visible (effective = realistic-fallback-mid)
-                "Credit (Realistic)": round(total_credit_eff, 2),
-                "Credit ($)": round(total_credit_mid, 2),
-                "Max Loss ($)": round(max_loss_val, 2),
-                "POP %": pop_avg,
-                "Breakeven": round(lower_breakeven, 2),
-                "Contracts": contracts,
-                "Spot": round(spot_price, 2),
+                "DTE": int(dte),
+                "Put Spread": put_trade,
+                "Call Spread": call_trade,
+                "Credit (Realistic)": total_credit_pc,
+                "Total Credit ($)": total_credit,
+                "Max Loss ($)": max_loss_total,
+                "POP %": pop,
+                "Breakeven": be_str,
+                "Distance %": distance_pct,
+                "Contracts": int(contracts),
+                "Spot": round(float(spot_price), 2),
             })
- 
+
+    if not trades:
+        log.info("DEBUG: No valid Iron Condor pairs after filtering.")
+
     return pd.DataFrame(trades)
+
+
+
+
+
 
 
 

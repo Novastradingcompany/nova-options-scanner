@@ -37,11 +37,19 @@ def style_table(df: pd.DataFrame, min_pop_val: int = 0):
                 return None
 
         df["Width"] = df["Trade"].apply(_extract_width)
+        def _to_float(val):
+            try:
+              return float(str(val).replace("$", "").replace(",", "").strip())
+            except:
+              return 0.0
+
         df["Premium Yield %"] = df.apply(
-            lambda x: round((x["Credit ($)"] / (x["Width"] * 100)) * 100, 1)
+            lambda x: round((_to_float(x.get("Credit ($)", 0)) / (float(x.get("Width", 0)) * 100)) * 100, 1)
             if x.get("Width") not in [None, 0] else None,
             axis=1
-        )
+   )
+
+        
 
     # ============================
     # ✅ Format numeric columns
