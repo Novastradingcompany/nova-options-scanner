@@ -7,15 +7,28 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 # 🔗 Nova shared modules
-from nova_rules import NOVA_RULES
+from nova_rules import NOVA_RULES, get_max_loss_threshold  # ✅ Add this import
 from core.style_utils import style_table
 from core.export_utils import download_excel_button
 from core.pdf_utils import download_pdf_button
-from core.trade_utils import format_credit_summary  # ✅ for unified credit summary
+from core.trade_utils import format_credit_summary
 
 from strategies.bull_put import scan_bull_put
 from strategies.bear_call import scan_bear_call
 from strategies.iron_condor import scan_iron_condor
+
+# Rest of the app logic remains unchanged
+
+# 🧠 Get cash input and calculate dynamic max loss threshold
+cash_balance = st.number_input("Account Cash ($)", min_value=100, value=2000, step=50, key="cash")
+max_loss_default = get_max_loss_threshold(cash_balance)
+# max_loss = st.slider("Max Loss ($)", 50, 1000, max_loss_default, 50, key="max_loss_dynamic")  # 👈 Unique key here
+# 🧠 Account Cash Input (used for dynamic max loss logic)
+# cash_balance = st.number_input("Account Cash ($)", min_value=100, value=2000, step=50, key="cash")
+
+
+
+# The rest of the Streamlit app continues as before...
 
 
 # =========================================================
@@ -103,7 +116,12 @@ if not exp_dates:
     st.warning("⚠️ Could not fetch expiration dates for this ticker.")
 
 max_width = st.slider("Max Spread Width ($)", 0.5, 5.0, 2.5, 0.5, key="width")
-max_loss = st.slider("Max Loss ($)", 50, 1000, 550, 50, key="loss")
+# 🔧 Max loss slider based on account balance
+from nova_rules import get_max_loss_threshold
+max_loss_default = get_max_loss_threshold(cash_balance)
+max_loss = st.slider("Max Loss ($)", 50, 1000, max_loss_default, 50, key="max_loss_scanner")
+
+# max_loss = st.slider("Max Loss ($)", 50, 1000, 550, 50, key="loss")#
 min_pop = st.slider("Minimum POP (%)", 0, 95, 70, 1, key="pop")
 contracts = st.slider("Contracts", 1, 10, 1, key="contracts")
 
