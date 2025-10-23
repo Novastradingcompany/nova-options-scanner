@@ -89,7 +89,7 @@ _boot_state()
 # 🧭 Scanner UI
 # =========================================================
 st.title("📊 Nova Options Scanner")
-st.caption("Version 2025-10-16")
+st.caption("Version 10-22-2025")
 
 ticker_input = st.text_input("Enter Ticker Symbol", "NVDA", key="ticker").upper()
 exp_dates, spot_price, ticker_obj = [], None, None
