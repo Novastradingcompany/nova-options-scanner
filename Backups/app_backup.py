@@ -76,10 +76,15 @@ def clean_chain(df: pd.DataFrame) -> pd.DataFrame:
 # 🧭 Scanner UI
 # =========================================================
 st.title("📊 Nova Options Scanner")
-st.caption("Version 10-23-2025")
+st.caption("Version 10-24-2025")
 
 ticker_input = st.text_input("Enter Ticker Symbol", "NVDA", key="ticker").upper()
 exp_dates, spot_price, ticker_obj = [], None, None
+
+# 💰 Account Cash → dynamic Max Loss
+cash_balance = st.number_input(
+    "Account Cash ($)", min_value=100, value=2000, step=50, key="account_cash"
+)
 
 if ticker_input:
     try:
@@ -104,10 +109,7 @@ if not exp_dates:
 
 max_width = st.slider("Max Spread Width ($)", 0.5, 5.0, 2.5, 0.5, key="width")
 
-# 💰 Account Cash → dynamic Max Loss
-cash_balance = st.number_input(
-    "Account Cash ($)", min_value=100, value=2000, step=50, key="account_cash"
-)
+
 max_loss_default = get_max_loss_threshold(cash_balance)
 max_loss = st.slider(
     "Max Loss ($)", 50, 1000, max_loss_default, 50, key="max_loss_scanner"
