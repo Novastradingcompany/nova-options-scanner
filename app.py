@@ -19,7 +19,7 @@ from strategies.iron_condor import scan_iron_condor
 
 
 # =========================================================
-# ⚙️ Page + API init (must be first Streamlit call)
+# ⚙️ Page + API init
 # =========================================================
 st.set_page_config(
     page_title="Nova Options Scanner",
@@ -82,9 +82,7 @@ ticker_input = st.text_input("Enter Ticker Symbol", "NVDA", key="ticker").upper(
 exp_dates, spot_price, ticker_obj = [], None, None
 
 # 💰 Account Cash → dynamic Max Loss
-cash_balance = st.number_input(
-    "Account Cash ($)", min_value=100, value=2000, step=50, key="account_cash"
-)
+cash_balance = st.number_input("Account Cash ($)", min_value=100, value=2000, step=50, key="account_cash")
 
 if ticker_input:
     try:
@@ -107,22 +105,19 @@ expiry_selected = (
 if not exp_dates:
     st.warning("⚠️ Could not fetch expiration dates for this ticker.")
 
+# --- Sliders ---
 max_width = st.slider("Max Spread Width ($)", 0.5, 5.0, 2.5, 0.5, key="width")
 
-
 max_loss_default = get_max_loss_threshold(cash_balance)
-max_loss = st.slider(
-    "Max Loss ($)", 50, 1000, max_loss_default, 50, key="max_loss_scanner"
-)
+max_loss = st.slider("Max Loss ($)", 50, 1000, max_loss_default, 50, key="max_loss_scanner")
 
 min_pop = st.slider("Minimum POP (%)", 0, 95, 70, 1, key="pop")
 contracts = st.slider("Contracts", 1, 10, 1, key="contracts")
 
 raw_mode = st.checkbox("🔎 Show Raw (ignore filters)", key="raw")
-spread_type = st.radio(
-    "Choose Strategy", ["Bull Put", "Bear Call", "Iron Condor"], key="strategy"
-)
+spread_type = st.radio("Choose Strategy", ["Bull Put", "Bear Call", "Iron Condor"], key="strategy")
 
+# --- Query tracking ---
 current_query = {
     "ticker": ticker_input,
     "expiry": expiry_selected,
@@ -240,7 +235,6 @@ def render_results(trades_df: pd.DataFrame, min_pop_val: int):
     st.session_state.total_credit_summary = format_credit_summary(total_credit_live, live_contracts)
 
     st.success(f"✅ Found {len(df_display)} {st.session_state.last_meta['strategy']} candidates")
-    # st.caption(st.session_state.total_credit_summary)
     st.dataframe(style_table(df_display, min_pop_val), width="stretch")
 
     st.markdown("#### 📁 Export Options")
@@ -284,15 +278,15 @@ def build_summary_prompt():
 
     return (
         dynamic_rules
-         +"\n---\n"
-         +f"{summary_line}\n\n"
-         +f"Ticker: {meta['ticker']} | Strategy: {meta['strategy']} | "
-         +f"Expiry: {meta['expiry']} ({meta['dte']} DTE) | "
-         +f"Contracts: {meta['contracts']} | Min POP: {meta['min_pop']}% | "
-         +f"Spot: ${meta['spot']:.2f}\n\n"
-         +cleaned_block
-         +"\n\nSummarize the best opportunities succinctly and reference 'Credit Received' "
-          "as total premium. Use the active max-loss threshold for qualification."
+         + "\n---\n"
+         + f"{summary_line}\n\n"
+         + f"Ticker: {meta['ticker']} | Strategy: {meta['strategy']} | "
+         + f"Expiry: {meta['expiry']} ({meta['dte']} DTE) | "
+         + f"Contracts: {meta['contracts']} | Min POP: {meta['min_pop']}% | "
+         + f"Spot: ${meta['spot']:.2f}\n\n"
+         + cleaned_block
+         + "\n\nSummarize the best opportunities succinctly and reference 'Credit Received' "
+           "as total premium. Use the active max-loss threshold for qualification."
     )
 
 
@@ -322,7 +316,7 @@ if st.session_state.last_trades_df is not None and st.session_state.last_meta is
             st.session_state.auto_summary = f"(Nova API error: {e})"
 
     if st.session_state.auto_summary:
-        st.text(st.session_state.auto_summary)  # 👈 fixes squiggly Markdown issue
+        st.text(st.session_state.auto_summary)
 
 
 # =========================================================
@@ -334,7 +328,7 @@ st.header("💬 Talk with Nova")
 for msg in st.session_state.nova_chat:
     who = "You" if msg["role"] == "user" else "Nova"
     with st.chat_message("user" if msg["role"] == "user" else "assistant"):
-        st.text(f"{who}: {msg['content']}")  # 👈 raw text output
+        st.text(f"{who}: {msg['content']}")
 
 user_msg = st.chat_input("Type to Nova…")
 if user_msg:
@@ -357,7 +351,9 @@ if user_msg:
 
     st.session_state.nova_chat.append({"role": "assistant", "content": reply})
     with st.chat_message("assistant"):
-        st.text(f"Nova: {reply}")  # 👈 raw text mode — no markdown
+        st.text(f"Nova: {reply}")
+
+
 
 
 
